@@ -1,0 +1,218 @@
+INSTALAR RUBY Y DEPENDENCIAS:
+
+curl -sL https://deb.nodesource.com/setup_12.x | sudo -E bash -
+
+curl -sS https://dl.yarnpkg.com/debian/pubkey.gpg | sudo apt-key add -
+
+echo "deb https://dl.yarnpkg.com/debian/ stable main" | sudo tee /etc/apt/sources.list.d/yarn.list
+
+sudo add-apt-repository ppa:chris-lea/redis-server
+
+sudo apt-get update
+
+sudo apt-get install git-core curl zlib1g-dev build-essential libssl-dev libreadline-dev libyaml-dev libsqlite3-dev sqlite3 libxml2-dev libxslt1-dev libcurl4-openssl-dev software-properties-common libffi-dev dirmngr gnupg apt-transport-https ca-certificates redis-server redis-tools nodejs yarn
+
+git clone https://github.com/rbenv/rbenv.git ~/.rbenv
+
+echo 'export PATH="$HOME/.rbenv/bin:$PATH"' >> ~/.bashrc
+
+echo 'eval "$(rbenv init -)"' >> ~/.bashrc
+
+git clone https://github.com/rbenv/ruby-build.git ~/.rbenv/plugins/ruby-build
+
+echo 'export PATH="$HOME/.rbenv/plugins/ruby-build/bin:$PATH"' >> ~/.bashrc
+
+git clone https://github.com/rbenv/rbenv-vars.git ~/.rbenv/plugins/rbenv-vars
+
+exec $SHELL
+
+rbenv install 3.0.1
+
+rbenv global 3.0.1
+
+ruby -v
+
+# CHECAR SIEMPRE LA VERSION DE RUBY DE LA MAQUINA DE DESARROLLO Y LA DEL SERVIDOR A VECES NO COINCIDEN Y NO SE LANZA 
+
+gem install bundler
+
+bundle -v
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+INSTALAR NGINX Y PASSENGER
+
+sudo apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 561F9B9CAC40B2F7
+
+sudo sh -c 'echo deb https://oss-binaries.phusionpassenger.com/apt/passenger bionic main > /etc/apt/sources.list.d/passenger.list'
+
+sudo apt-get update
+
+sudo apt-get install -y nginx-extras libnginx-mod-http-passenger
+
+if [ ! -f /etc/nginx/modules-enabled/50-mod-http-passenger.conf ]; then sudo ln -s /usr/share/nginx/modules-available/mod-http-passenger.load /etc/nginx/modules-enabled/50-mod-http-passenger.conf ; fi
+
+sudo ls /etc/nginx/conf.d/mod-http-passenger.conf      #SOLO PARA CHECAR SI NGINX SE INSTALO CORRECTAMENTE
+
+sudo nano /etc/nginx/conf.d/mod-http-passenger.conf
+
+IR A LA LINEA DE PASSENGER_RUBY Y MODIFICARLA POR DONDE SE INSTALO RUBY CON RBENV (PEGAR LO SIGUIENTE)
+
+passenger_ruby /home/deploy/.rbenv/shims/ruby;
+
+sudo service nginx status
+
+sudo service nginx start
+
+sudo rm /etc/nginx/sites-enabled/default
+
+sudo nano /etc/nginx/sites-enabled/myapp      => CAMBIAR myapp POR EL NOMBRE DEL PROYECTO EL CONTENEDOR
+
+PEGAR EN ESE ARCHIVO
+
+server {
+  listen 80;
+  listen [::]:80;
+
+  server_name midominio.com www.midominio.com;
+  root /home/ubuntu/myapp/current/public;
+  #CHECAR ubuntu si estas en EC2 dejalo en ubuntu o cambialo por el usuario que creaste en el VPS por lo general es ubuntu
+
+  passenger_enabled on;
+  passenger_app_env production;
+
+  location /cable {
+    passenger_app_group_name myapp_websocket;
+    passenger_force_max_concurrent_requests_per_process 0;
+  }
+
+  # Allow uploads up to 100MB in size
+  client_max_body_size 100m;
+
+  location ~ ^/(assets|packs) {
+    expires max;
+    gzip_static on;
+  }
+}
+
+sudo service nginx reload
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+TRABAJANDO CON LA BASE DE DATOS
+
+sudo apt-get install postgresql postgresql-contrib libpq-dev
+
+sudo su - postgres
+
+createuser --pwprompt nombredeusuarioDEBASEDEDATOS                              # TE PEDIRA UN PASSWORD 2 VECES ANOTALO PARA EVITAR PROBLEMAS
+createdb -O nombredeusuarioDEBASEDEDATOS nombreDEBASEDATOSDELPROYECTO           # nombreDEBASEDATOSDELPROYECTO RECUERDA QUE ES EL NOMBRE DE LA BASE DE DATOS
+exit
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+IR AL GEMFILE E INSTALAR LAS SIGUIENTES GEMAS (EN LA MAQUINA DE DESARROLLO LOCAL)
+
+gem 'capistrano', '~> 3.11'
+gem 'capistrano-rails', '~> 1.4'
+gem 'capistrano-passenger', '~> 0.2.0'
+gem 'capistrano-rbenv', '~> 2.1', '>= 2.1.4'
+
+EJECUTAR:
+
+bundle
+
+bundle exec cap STAGES=production
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+MODIFICAR LOS ARCHIVOS PARA UNA CONEXION SIN PROBLEMAS 
+
+IR A Capfile Y AGREGAR LO SIGUIENTE
+----------------------------------------------------------------------------------------------------------
+require "capistrano/scm/git"          #  UBIQUE ESTA LINEA EN SU CAPFILE Y PEGUE LO DE ABAJO 
+install_plugin Capistrano::SCM::Git
+
+require 'capistrano/rails'
+require 'capistrano/passenger'
+require 'capistrano/rbenv'
+
+set :rbenv_type, :user
+set :rbenv_ruby, '3.0.1'            #   SIEMPRE CHECA LA VERSION DE RUBY LOS ERRORES SON POR ESO
+----------------------------------------------------------------------------------------------------------
+IR A config/deploy.rb Y AGREGAR LO SIGUIENTE
+----------------------------------------------------------------------------------------------------------
+set :application, "NombreDeAplicacion"      # Para evitar problema usar el nombre como esta guardado en el repo de github
+set :repo_url, "git@github.com:usuariogithub/repositorio.git"       # Por las nuevas politicas de siempre usar la terminacion .git para evitar el logeo manual
+
+set :deploy_to, "/home/ubuntu/#{fetch :application}"
+append :linked_dirs, 'log', 'tmp/pids', 'tmp/cache', 'tmp/sockets', 'vendor/bundle', '.bundle', 'public/system', 'public/uploads'
+set :keep_releases, 5
+set :branch, 'master'
+
+set :ssh_options, { forward_agent: true, user: fetch(:user), keys: %w(/home/usuario/locacion-de-llave-pem/millave.pem) }    # SI SE USA EC2 SIEMPRE DALE LA RUTA DEL PEM QUE USAS PARA CONECTARTE 
+----------------------------------------------------------------------------------------------------------
+IR A config/deploy/production.rb Y AGREGAR LO SIGUIENTE
+----------------------------------------------------------------------------------------------------------
+server '1.2.3.4', user: 'ubuntu', roles: %w{app db web}         # VERIFICAR SIEMPRE EL USUARIO "ubuntu" Y LA IP DEL SERVIDOR
+set :ssh_options, {
+  keys: %w(/home/usuario/locacion-de-llave-pem/millave.pem),    # SI USAS EC2 DE AWS SIEMPRE LANZAR LA DIRECCION DE LA LLAVE PEM PARA ACCEDER AL SERVIDOR
+  forward_agent: false,
+  auth_methods: %w(publickey password)
+}
+
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+CREANDO LA CARPETA Y CONFIGURANDO LAS VARIABLES DE ENTORNO (ENVIROMENTS)
+
+CONECTARTE DE NUEVO AL SERVIDOR Y EJECUTAMOS:
+
+mkdir /home/ubuntu/myapp          # RECUERDA QUE ubuntu ES EL NOMBRE DE USUARIO, myapp ES EL NOMBRE DE TU PROYECTO POR TEMAS DE SIMPLICIDAD USA EL NOMBRE DEL REPOSITORIO
+sudo nano /home/ubuntu/myapp/.rbenv-vars        
+
+EN EL ARCHIVO PEGA LO SIGUIENTE
+DATABASE_URL=postgresql://nombredeusuarioDEBASEDEDATOS:passwordDEBASEDEDATOS@127.0.0.1/nombreDEBASEDATOSDELPROYECTO
+
+SECRET_KEY_BASE=1234567890        (EJECUTAR EN DESARROLLO bundle exec rails secret Y PEGAR ACA)
+
+IR A LA MAQUINA LOCAL DE DESARROLLO Y CORRER LO SIGUIENTE (ESTANDO EN LA CARPETA DEL PROYECTO)
+EJECUTAR :
+bundle exec rails secret
+
+COPIAR ESOS CARACTERES EN SECRET_KEY_BASE
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+EMPEZAMOS CON EL DEPLOY
+
+PRIMERO SIEMPRE FIJARSE:
+
+NO DEBES TENER COMMIT'S NI PUSH'S PENDIENTES EL REPOSITORIO LOCAL DEBE SER IDENTICO AL QUE ESTA EN GITHUB 
+IR AL LAYOUT DE LAS (proyecto/app/views/layouts/application.html.erb) Y PEGAR LO SIGUIENTE, PARA CARGAR LOS ESTILOS E IMAGENES
+
+<%= csrf_meta_tags %>
+<%= csp_meta_tag %>
+<%= stylesheet_pack_tag 'application', media: 'all' %>
+<%= javascript_pack_tag 'application' %>
+
+AHORA SI EMPECEMOS CON EL DEPLOY EN LA MAQUINA LOCAL CORRER LO SIGUIENTE
+
+bundle exec cap production deploy
+
+ESO ES TODO :) 
+
+PARA CORRER LOS LOGS EN EL PROYECTO :
+
+less /home/deploy/myapp/current/log/production.log
+
+PARA VER LOS LOGS EN EL SERVIDOR NGINX Y PASSENGER
+
+sudo less /var/log/nginx/error.log
+
+///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+NO FUNCIONA EL "cap" ENTONCES USAR
+bundle exec cap
+
+EJECUTAR CONSOLA EN VPS (IR AL VPS Y CORRER)
+RAILS_ENV=production bundle exec rails c
