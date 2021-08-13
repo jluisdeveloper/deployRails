@@ -1,0 +1,20 @@
+///////////////////////////////////////////////////////////////////////////////////////
+
+PARA CERTIFICADO SSL
+INSTALAR CERTBOT
+
+sudo apt update
+sudo apt-get install certbot
+sudo apt-get install python3-certbot-nginx    o       apt-get install python-certbot-nginx        //checar la version de python del servidor
+
+CREANDO EL CERTIFICADO
+
+sudo certbot --nginx -d dominio.com -d www.dominio.com
+
+CREANDO UNA TAREA AUTOMATIZADA PARA RENOVAR EL CERTIFICADO
+
+sudo crontab -e         // elegir nano 
+
+PEGAR LO SIGUIENTE:   ESTO HARA QUE CADA DIA AL MEDIO DIA EL CRONTAB PREGUNTE SI EL CERTIFICADO ESTA POR VENCERSE SI ES ASI SE RENUEVA EN AUTO
+
+30 2 * * 1 /home/ubuntu/.local/share/letsencrypt/bin/letsencrypt renew
